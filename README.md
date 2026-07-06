@@ -99,7 +99,7 @@ VIM, alphas, prediction_score, stability_score, treeEstimators = dynGENIE3(
 )
 ```
 
-Each run produces a ranked list of regulatory links (`regulatory_network_ranking_<condition>.txt`) — the weighted edges of the inferred network. Comparing the two ranked lists (edges gained/lost, hub gene shifts) is how regulatory rewiring under antibiotic stress is detected.
+**Output** - Each run produces a ranked list of regulatory links (`regulatory_network_ranking_<condition>.txt`) — the weighted edges of the inferred network. Comparing the two ranked lists (edges gained/lost, hub gene shifts) is how regulatory rewiring under antibiotic stress is detected.
 
 ## Key References
 
