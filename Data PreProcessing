@@ -1,0 +1,275 @@
+!pip install pydeseq2
+
+%%writefile config.py
+RAW_COUNTS_PATH   = "data/raw_counts.csv"
+SAMPLE_INFO_PATH  = "data/sample_info.csv"
+OUTPUT_DIR        = "outputs"
+
+SAMPLE_ID_COL   = "sample_id"
+TIMEPOINT_COL   = "timepoint"
+CONDITION_COL   = "condition"
+REPLICATE_COL   = "replicate"
+
+MIN_COUNT_PER_GENE     = 10 # Changed from 10 to 1
+MIN_SAMPLES_EXPRESSED  = 2 # Changed from 2 to 1
+MIN_TOTAL_LIBRARY_SIZE = 1e5
+REPLICATE_CORR_THRESHOLD = 0.85
+
+NORMALIZATION_METHOD = "deseq2"
+LOG_PSEUDOCOUNT = 1
+EXPORT_FOR_DYNGENIE3 = True
+
+%%writefile step1_load_data.py
+import pandas as pd
+import os
+import config
+
+def load_raw_counts(path: str) -> pd.DataFrame:
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Could not find raw counts file at '{path}'.")
+    return pd.read_csv(path, index_col=0)
+
+def load_sample_info(path: str) -> pd.DataFrame:
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Could not find sample info file at '{path}'.")
+    return pd.read_csv(path)
+
+def validate_alignment(counts: pd.DataFrame, sample_info: pd.DataFrame):
+    count_samples = set(counts.columns)
+    meta_samples = set(sample_info[config.SAMPLE_ID_COL])
+    missing_in_meta = count_samples - meta_samples
+    missing_in_counts = meta_samples - count_samples
+    problems = []
+    if missing_in_meta: problems.append(f"  - Missing from sample_info.csv: {sorted(missing_in_meta)}")
+    if missing_in_counts: problems.append(f"  - Missing from count matrix: {sorted(missing_in_counts)}")
+    if problems: raise ValueError("Sample mismatch:\n" + "\n".join(problems))
+
+    # Explicitly rename 'index' back to config's SAMPLE_ID_COL after reindexing
+    sample_info = sample_info.set_index(config.SAMPLE_ID_COL).loc[counts.columns]
+    sample_info = sample_info.reset_index().rename(columns={"index": config.SAMPLE_ID_COL})
+
+    print(f"✓ All {len(count_samples)} samples match.")
+    return sample_info
+
+def summarize_input(counts: pd.DataFrame, sample_info: pd.DataFrame):
+    print("\n── Input summary ──")
+    print(f"Genes:               {counts.shape[0]}")
+    print(f"Samples:             {counts.shape[1]}")
+    print(f"Timepoints:           {sorted(sample_info[config.TIMEPOINT_COL].unique())}")
+    print(f"Conditions:           {sample_info[config.CONDITION_COL].unique().tolist()}\n")
+
+if __name__ == "__main__":
+    counts = load_raw_counts(config.RAW_COUNTS_PATH)
+    sample_info = load_sample_info(config.SAMPLE_INFO_PATH)
+    sample_info = validate_alignment(counts, sample_info)
+    summarize_input(counts, sample_info)
+    os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+    counts.to_pickle(f"{config.OUTPUT_DIR}/01_raw_counts.pkl")
+    sample_info.to_pickle(f"{config.OUTPUT_DIR}/01_sample_info.pkl")
+
+#QUALITY CONTROL
+
+%%writefile step2_quality_control.py
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import config
+import sys # Import sys to exit the script
+sns.set_style("whitegrid")
+
+def check_library_sizes(counts: pd.DataFrame) -> pd.Series:
+    lib_sizes = counts.sum(axis=0)
+    flagged = lib_sizes[lib_sizes < config.MIN_TOTAL_LIBRARY_SIZE]
+    if len(flagged) > 0:
+        for s, v in flagged.items(): print(f"  ⚠ Low depth -> {s}: {v:.0f} reads")
+    else: print(f"✓ All samples have enough reads.")
+    return lib_sizes
+
+def filter_low_count_genes(counts: pd.DataFrame) -> pd.DataFrame:
+    expressed_mask = (counts >= config.MIN_COUNT_PER_GENE).sum(axis=1) >= config.MIN_SAMPLES_EXPRESSED
+    filtered = counts.loc[expressed_mask]
+    print(f"✓ Kept {filtered.shape[0]} / {counts.shape[0]} genes.")
+    return filtered
+
+def check_replicate_correlation(counts: pd.DataFrame, sample_info: pd.DataFrame):
+    # Only proceed if there are genes to analyze
+    if counts.empty:
+        print("  Skipping replicate correlation check: No genes left after filtering.")
+        return None
+
+    log_counts = np.log2(counts + 1)
+    corr_matrix = log_counts.corr(method="pearson")
+    grouped = sample_info.groupby([config.TIMEPOINT_COL, config.CONDITION_COL])[config.SAMPLE_ID_COL].apply(list)
+    for group_key, samples in grouped.items():
+        if len(samples) < 2: continue
+        for i in range(len(samples)):
+            for j in range(i + 1, len(samples)):
+                r = corr_matrix.loc[samples[i], samples[j]]
+                if r < config.REPLICATE_CORR_THRESHOLD:
+                    print(f"  ⚠ Low corr -> {group_key}: {samples[i]} vs {samples[j]} (r = {r:.3f})")
+    return corr_matrix
+
+if __name__ == "__main__":
+    counts = pd.read_pickle(f"{config.OUTPUT_DIR}/01_raw_counts.pkl")
+    sample_info = pd.read_pickle(f"{config.OUTPUT_DIR}/01_sample_info.pkl")
+    print("\n── Step 2: Quality Control ──")
+    lib_sizes = check_library_sizes(counts)
+    counts_filtered = filter_low_count_genes(counts)
+
+    # Added explicit check for empty DataFrame after filtering
+    if counts_filtered.empty:
+        print("✗ Error: No genes left after filtering. Please adjust MIN_COUNT_PER_GENE or MIN_SAMPLES_EXPRESSED in config.py or check your raw data.")
+        sys.exit(1) # Exit the script if no genes are left
+
+    corr_matrix = check_replicate_correlation(counts_filtered, sample_info)
+    counts_filtered.to_pickle(f"{config.OUTPUT_DIR}/02_filtered_counts.pkl")
+
+#NORMALIZATION
+
+%%writefile step3_normalization.py
+import pandas as pd
+import numpy as np
+import config
+
+def normalize_deseq2(counts: pd.DataFrame, sample_info: pd.DataFrame) -> pd.DataFrame:
+    from pydeseq2.dds import DeseqDataSet
+    from pydeseq2.default_inference import DefaultInference
+    counts_t = counts.T.astype(int)
+    meta = sample_info.set_index(config.SAMPLE_ID_COL).loc[counts_t.index]
+    design_col = config.CONDITION_COL
+    if meta[design_col].nunique() < 2: design_col = config.TIMEPOINT_COL; meta[design_col] = meta[design_col].astype(str)
+    dds = DeseqDataSet(counts=counts_t, metadata=meta, design=f"~{design_col}", inference=DefaultInference(), quiet=True)
+    dds.fit_size_factors()
+    normalized = counts_t.div(dds.obs["size_factors"], axis=0).T
+    print("✓ DESeq2 normalisation complete.")
+    return normalized
+
+if __name__ == "__main__":
+    counts = pd.read_pickle(f"{config.OUTPUT_DIR}/02_filtered_counts.pkl")
+    sample_info = pd.read_pickle(f"{config.OUTPUT_DIR}/01_sample_info.pkl")
+    print("\n── Step 3: Normalisation ──")
+    if config.NORMALIZATION_METHOD == "deseq2":
+        normalized = normalize_deseq2(counts, sample_info)
+    normalized.to_pickle(f"{config.OUTPUT_DIR}/03_normalized_counts.pkl")
+
+#LOG TRANSFORM
+
+%%writefile step4_log_transform_and_explore.py
+import pandas as pd
+import numpy as np
+import config
+
+if __name__ == "__main__":
+    normalized = pd.read_pickle(f"{config.OUTPUT_DIR}/03_normalized_counts.pkl")
+    print("\n── Step 4: Log Transform ──")
+    log_data = np.log2(normalized + config.LOG_PSEUDOCOUNT)
+    print(f"✓ Log2 transform applied.")
+    log_data.to_pickle(f"{config.OUTPUT_DIR}/04_log_normalized_counts.pkl")
+
+%%writefile step5_export_for_dyngenie3.py
+import pandas as pd
+import numpy as np
+import config
+
+def export_per_condition(log_data: pd.DataFrame, sample_info: pd.DataFrame):
+    meta = sample_info.set_index(config.SAMPLE_ID_COL)
+    conditions = meta[config.CONDITION_COL].unique()
+    for cond in conditions:
+        cond_samples = meta[meta[config.CONDITION_COL] == cond].index
+        cond_data = log_data[cond_samples]
+        cond_meta = meta.loc[cond_samples]
+        avg_by_timepoint = {}
+        for tp in sorted(cond_meta[config.TIMEPOINT_COL].unique()):
+            tp_samples = cond_meta[cond_meta[config.TIMEPOINT_COL] == tp].index
+            avg_by_timepoint[tp] = cond_data[tp_samples].mean(axis=1)
+        avg_matrix = pd.DataFrame(avg_by_timepoint).T
+        avg_matrix.index.name = "time"
+        avg_matrix.to_csv(f"{config.OUTPUT_DIR}/05_dynGENIE3_input_{cond}_averaged.csv")
+    print("✓ Reshaped matrices exported for dynGENIE3.")
+
+if __name__ == "__main__":
+    log_data = pd.read_pickle(f"{config.OUTPUT_DIR}/04_log_normalized_counts.pkl")
+    sample_info = pd.read_pickle(f"{config.OUTPUT_DIR}/01_sample_info.pkl")
+    print("\n── Step 5: Export for dynGENIE3 ──")
+    export_per_condition(log_data, sample_info)
+
+#NOW YOU WILL BE ASKED TO UPLOAD raw_counts.csv and sample_info.csv
+
+import os
+import shutil
+from google.colab import files
+
+os.makedirs("data", exist_ok=True)
+
+print("Select your RAW COUNTS file (genes x samples):")
+uploaded_counts = files.upload()
+counts_filename = list(uploaded_counts.keys())[0]
+shutil.move(counts_filename, "data/raw_counts.csv")
+
+print("\nSelect your SAMPLE INFO file (sample_id, timepoint, condition, replicate):")
+uploaded_info = files.upload()
+info_filename = list(uploaded_info.keys())[0]
+shutil.move(info_filename, "data/sample_info.csv")
+
+print("\n✓ Files saved to data/raw_counts.csv and data/sample_info.csv")
+
+#RUN PIPELINE
+
+%%writefile run_pipeline.py
+import subprocess
+import sys
+import os
+import config
+
+STEPS = [
+    "step1_load_data.py",
+    "step2_quality_control.py",
+    "step3_normalization.py",
+    "step4_log_transform_and_explore.py",
+    "step5_export_for_dyngenie3.py",
+]
+
+if __name__ == "__main__":
+    os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+    print("=" * 45)
+    print(" RUNNING FULL DATA PREPARATION PIPELINE")
+    print("=" * 45)
+    for step_script in STEPS:
+        result = subprocess.run([sys.executable, step_script])
+        if result.returncode != 0:
+            print(f"\n✗ Pipeline stopped — '{step_script}' failed.")
+            sys.exit(1)
+    print("=" * 45)
+    print(" PIPELINE COMPLETE. Find outputs in 'outputs/'")
+    print("=" * 45)
+
+!python run_pipeline.py
+
+
+
+import pandas as pd
+import numpy as np
+import pickle
+
+def build_ts_pickle(csv_path, output_pkl):
+    df = pd.read_csv(csv_path, index_col=0)   # index = time, columns = genes
+    df = df.sort_index()
+
+    gene_names = list(df.columns)
+    time_points = [df.index.to_numpy(dtype=float)]   # list with ONE time series
+    TS_data = [df.to_numpy(dtype=float)]              # list with ONE array (timepoints x genes)
+
+    # No experimentally measured decay rates available yet.
+    # dynGENIE3 can estimate these itself from the data (this is the
+    # standard/default behavior) rather than you supplying fixed values.
+    decay_rates = None
+
+    with open(output_pkl, "wb") as f:
+        pickle.dump((TS_data, time_points, decay_rates, gene_names), f)
+    print(f"✓ Saved {output_pkl}  ({len(gene_names)} genes, {len(time_points[0])} timepoints)")
+
+build_ts_pickle("outputs/05_dynGENIE3_input_control_averaged.csv", "TS_data_control.pkl")
+build_ts_pickle("outputs/05_dynGENIE3_input_antibiotic_averaged.csv", "TS_data_antibiotic.pkl")
+
+#(TILL HERE YOU WILL GET 2 FILES BOTH READY TO BE INPUT IN dynGENIE3 - ONE IS CSV FILES FOR CONTROL AND OTHER IS FOR ANTIBIOTIC)
