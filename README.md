@@ -79,6 +79,9 @@ Run the whole sequence with:
 ```bash
 python run_pipeline.py
 ```
+**Output will be** - `TS_data_antibiotic.pkl` and `TS_data_control.pkl`
+
+
 
 ### Step 3 — Run the dynGENIE3 Pipeline
 
