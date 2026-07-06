@@ -1,3 +1,5 @@
+#It will give 2 files as output- raw_counts.csv and sample_info.csv
+
 %%writefile generate_test_data.py
 import numpy as np
 import pandas as pd
