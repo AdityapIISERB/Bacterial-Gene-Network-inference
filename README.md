@@ -1,13 +1,13 @@
 # Dynamic Transcriptomic States and GRN Rewiring in Antibiotic Resistance Evolution
 
-Summer research project — IISER Bhopal
-Supervisor: Dr. Garima Rani · Collaborator: Neetika
+Summer research project
+Supervisor: Dr. Garima Rani and Dr. Neetika
 
 ## Research Question
 
 Can dynamic transcriptomic states and gene regulatory network (GRN) rewiring — rather than mutations alone — predict and redirect the evolution of antibiotic resistance in bacteria?
 
-Most resistance-evolution studies focus on genetic mutations as the primary driver. This project instead asks whether **regulatory rewiring** (changes in which genes control which other genes, over time, under antibiotic stress) can itself act as a predictive signal or even a redirectable lever for resistance outcomes.
+Most resistance-evolution studies focus on genetic mutations as the primary driver. This project instead asks whether **regulatory rewiring** (changes in which genes control which other genes, over time, under antibiotic stress) can itself act as a predictive signal or even redirect resistance outcomes.
 
 ## Approach
 
