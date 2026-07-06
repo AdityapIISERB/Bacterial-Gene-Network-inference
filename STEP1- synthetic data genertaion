@@ -37,4 +37,4 @@ counts_df.to_csv("data/raw_counts.csv")
 pd.DataFrame(sample_records).to_csv("data/sample_info.csv", index=False)
 print("✓ Synthetic dataset generated in 'data/' directory.")
 
-#see [raw_counts](Bacterial-Gene-Network-inference/main/regulatory_network_ranking.txt)
+#we get [raw_counts(1).csv and sample_info(1).csv] for output
