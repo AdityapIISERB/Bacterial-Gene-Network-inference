@@ -36,3 +36,5 @@ counts_df["control_T24_rep2"] = np.random.negative_binomial(n=2, p=0.3, size=cou
 counts_df.to_csv("data/raw_counts.csv")
 pd.DataFrame(sample_records).to_csv("data/sample_info.csv", index=False)
 print("✓ Synthetic dataset generated in 'data/' directory.")
+
+#see [raw_counts](Bacterial-Gene-Network-inference/main/regulatory_network_ranking.txt)
