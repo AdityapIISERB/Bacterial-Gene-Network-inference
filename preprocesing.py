@@ -36,11 +36,15 @@ import pandas as pd
 import os
 import config
 
+# DEFINED TO READ THE RAW COUNTS FILE & SHOW ERROR IF THE PATH OF THE UPLOADED RAW COUNTS- FILE IS NOT CORRECT
 def load_raw_counts(path: str) -> pd.DataFrame:
     if not os.path.exists(path):
         raise FileNotFoundError(f"Could not find raw counts file at '{path}'.")
-    return pd.read_csv(path, index_col=0)
+    return pd.read_csv(path, index_col=0)    #By default, pd.read_csv() creates a numerical row index (0, 1, 2, ...) 
+                                             # and treats your gene names (like Gene_A, Gene_B) as a standard data column.
+                                             # INDEX_COL=0 TELLS PANDA THAT FIRST ROW IS GENE ID NOT RAW COUNTS;
 
+# DEFINED TO READ SAMPLE INFO FILE & SHOW ERROR IF THE PATH OF THE UPLOADED SAMPLE INFO- FILE IS NOT CORRECT
 def load_sample_info(path: str) -> pd.DataFrame:
     if not os.path.exists(path):
         raise FileNotFoundError(f"Could not find sample info file at '{path}'.")
