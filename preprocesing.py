@@ -6,6 +6,8 @@ SAMPLE_INFO_PATH  = "data/sample_info.csv"  # metadata: which sample is which co
 OUTPUT_DIR        = "outputs"               # every step writes its output .pkl here
 
 # --- Column names expected in sample_info.csv ---
+# YOU NEED TO MAKE THIS FILE ON YOUR OWN - YOU CAN SEE SAMPL_INFO.CSV FOR REFERENCE HOW IT SHOUDL LOOK LIKE
+# THIS FILE DEFINES WHAT EACH COLUMN MEANS ? LIKE WHAT DOES IT MEAN FOR A COLUMN NAMED amp_14_t_0= ampiclin 1/4 x mic is used, t=0 sec 
 
 SAMPLE_ID_COL   = "sample_id"
 TIMEPOINT_COL   = "timepoint"
@@ -19,9 +21,15 @@ MIN_SAMPLES_EXPRESSED  = 2
 MIN_TOTAL_LIBRARY_SIZE = 1e5
 REPLICATE_CORR_THRESHOLD = 0.85
 
-NORMALIZATION_METHOD = "deseq2"
-LOG_PSEUDOCOUNT = 1
-EXPORT_FOR_DYNGENIE3 = True
+NORMALIZATION_METHOD = "deseq2"   
+LOG_PSEUDOCOUNT = 1               #global variable set to 1 so that if counts is 0, their log doesn't go to minus infinity
+EXPORT_FOR_DYNGENIE3 = True       #Acts like a toggle switch, and the whole downstream of this part can be controlled from here
+
+# -------------------------- LOADING DATA -------------------------------------------------
+# PURPOSE: load raw counts + sample metadata from disk,
+# verify the two files actually refer to the same samples,
+# print a quick summary, and cache both as pickles so the
+# next step doesn't need to re-parse CSVs.
 
 %%writefile step1_load_data.py
 import pandas as pd
