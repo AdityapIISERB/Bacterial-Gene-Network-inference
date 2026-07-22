@@ -216,6 +216,7 @@ if __name__ == "__main__":
 #dynGENIE3 expects input structured in a specific way:
   #1 - Diff files for diff conditions --> one file per condn;
   #2- dynGENIE3 models time-series dynamics & expects one single expression value per gene at each timepoint;
+    # In this step- FOr 2 replicates in same condn, same timepoint--> we average it and make it a single representative of that point;
   #3- expects time series data as Numpy array rather than pandas data frames that we have used 
   #4- expects Rows= timepoints % Columns= genes  [will be done via Transpose]
 %%writefile step5_export_for_dyngenie3.py
@@ -234,9 +235,9 @@ def export_per_condition(log_data: pd.DataFrame, sample_info: pd.DataFrame):
         cond_meta = meta.loc[cond_samples]
         avg_by_timepoint = {}
         for tp in sorted(cond_meta[config.TIMEPOINT_COL].unique()):  #Iterates through every unique timepoint in sorted order t=0, 1, 2, 4...
-            tp_samples = cond_meta[cond_meta[config.TIMEPOINT_COL] == tp].index
-            avg_by_timepoint[tp] = cond_data[tp_samples].mean(axis=1)  #
-        avg_matrix = pd.DataFrame(avg_by_timepoint).T                  #Transpose fro ro=timepoints & col=genes
+            tp_samples = cond_meta[cond_meta[config.TIMEPOINT_COL] == tp].index  
+            avg_by_timepoint[tp] = cond_data[tp_samples].mean(axis=1)  #averaging out replicates of same condn + same timpepoint 
+        avg_matrix = pd.DataFrame(avg_by_timepoint).T                  #Transpose for making it --> row=timepoints & col=genes
 
         # To convert into Numpy 
         time_points = np.array(sorted(cond_meta[config.TIMEPOINT_COL].unique()), dtype=float)
@@ -244,6 +245,7 @@ def export_per_condition(log_data: pd.DataFrame, sample_info: pd.DataFrame):
         TS_data = [np.array(avg_matrix.values, dtype=float)]
         decay_rates = None
 
+        #For converting into PICKLE:
         with open(f"{config.OUTPUT_DIR}/05_dynGENIE3_input_{cond}.pkl", "wb") as f:
             pickle.dump((TS_data, time_points, decay_rates, gene_names), f, protocol=4)
 
@@ -255,8 +257,8 @@ if __name__ == "__main__":
     print("\n── Step 5: Export for dynGENIE3 ──")
     export_per_condition(log_data, sample_info)
 
+# -------------------------- UPLOADING DATA --------------------------------------------------------------
 ## Upload Your Own Data
-
 #This pipeline expects two files inside a `data/` folder:
 
 # 1. "raw_counts.csv" — a raw count matrix, **genes as rows, samples as columns**. The first column must be the gene ID (this becomes the row index).
