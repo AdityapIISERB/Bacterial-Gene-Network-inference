@@ -25,7 +25,7 @@ NORMALIZATION_METHOD = "deseq2"
 LOG_PSEUDOCOUNT = 1               #global variable set to 1 so that if counts is 0, their log doesn't go to minus infinity
 EXPORT_FOR_DYNGENIE3 = True       #Acts like a toggle switch, and the whole downstream of this part can be controlled from here
 
-# -------------------------- LOADING DATA -------------------------------------------------
+# -------------------------- READING DATA ----------------------------------------------------------
 # PURPOSE: load raw counts + sample metadata from disk,
 # verify the two files actually refer to the same samples,
 # print a quick summary, and cache both as pickles so the
@@ -90,7 +90,7 @@ if __name__ == "__main__":
     sample_info.to_pickle(f"{config.OUTPUT_DIR}/01_sample_info.pkl")
 
 
-# -------------------------- QUALITY CONTROL -------------------------------------------------
+# -------------------------- QUALITY CONTROL ---------------------------------------------------------
 
 # PURPOSE: three independent QC checks —
 #   1. flag samples that were sequenced too shallowly
@@ -118,14 +118,19 @@ def check_library_sizes(counts: pd.DataFrame) -> pd.Series:
 # CHECKING FOR LOW COUNT GENES;
 # (counts >= MIN_COUNT_PER_GENE) --> True wherever a gene has at least 10 reads(as defined at the top) in that particular sample
 # >= MIN_SAMPLES_EXPRESSED -> True/False mask per gene: "is this gene expressed in enough samples to be worth keeping?"
+# Creates a True/False DataFrame for each cell of the exact same dimensions as counts. Every entry with > 10 reads becomes True, while entries with < 10 reads become False. 
+# fro each cell true=1 & false=0; then sums each row and tells how many genes is > MIN_SAMPLES_EXPRESSED (global variable)
 def filter_low_count_genes(counts: pd.DataFrame) -> pd.DataFrame:
-    expressed_mask = (counts >= config.MIN_COUNT_PER_GENE).sum(axis=1) >= config.MIN_SAMPLES_EXPRESSED # sum(axis=1)--> sums each row
-    filtered = counts.loc[expressed_mask]
+    expressed_mask = (counts >= config.MIN_COUNT_PER_GENE).sum(axis=1) >= config.MIN_SAMPLES_EXPRESSED    #sum(axis=1)--> sums each row
+    filtered = counts.loc[expressed_mask]          # filtered only retains where expressed masks is TRUE
     print(f"✓ Kept {filtered.shape[0]} / {counts.shape[0]} genes.")
     return filtered
 
-#CHCEKING FOR REPLICATE DUPLICATES IF PRESENT TO BE REMOVED
-# COMPARING WITH PERASON CORRELATION - BUT IT IS HIGHLY SKEWED RIGHT, SO FIRST LOG TRANSFROM VALUES
+# CHECKING FOR BAD OR DUPLICATE REPLICATES IF PRESENT TO BE REMOVED
+# PEARSON CORRELATION tells - checks if two biological replicates behave identically;  
+# compare bw 2 replicates; LOG_rep_1 vs LOG_rep_2--> r=1(if one goes up, another goes up too), r=-1(opposite), r=0(no pattern)
+# COMPARING WITH PERASON CORRELATION - BUT IT IS HIGHLY SKEWED RIGHT, SO FIRST LOG TRANSFORM VALUES
+# is this gene expressed in enough samples to be worth keeping ?
 def check_replicate_correlation(counts: pd.DataFrame, sample_info: pd.DataFrame):
     log_counts = np.log2(counts + 1)                      # LOG TRANSFFROMING compresses the skewness for better comparison
     corr_matrix = log_counts.corr(method="pearson")      # PAIRWISE CORRELATION bw EACH COLUMN(SAMPLES)--> sample x sample correlation matrix
@@ -135,18 +140,29 @@ def check_replicate_correlation(counts: pd.DataFrame, sample_info: pd.DataFrame)
         for i in range(len(samples)):
             for j in range(i + 1, len(samples)):
                 r = corr_matrix.loc[samples[i], samples[j]]
-                if r < config.REPLICATE_CORR_THRESHOLD:
+                if r < config.REPLICATE_CORR_THRESHOLD:         # THIS CHECKS IF r>=0.85(REPLICATE_CORR_THRESHOLD)(defined in config at top) those 2 samples are replicates;
                     print(f"  ⚠ Low corr -> {group_key}: {samples[i]} vs {samples[j]} (r = {r:.3f})")
     return corr_matrix
 
+#TO PRINT THE OUTPUT OF THIS STEP:
 if __name__ == "__main__":
     counts = pd.read_pickle(f"{config.OUTPUT_DIR}/01_raw_counts.pkl")
     sample_info = pd.read_pickle(f"{config.OUTPUT_DIR}/01_sample_info.pkl")
     print("\n── Step 2: Quality Control ──")
-    lib_sizes = check_library_sizes(counts)
-    counts_filtered = filter_low_count_genes(counts)
-    corr_matrix = check_replicate_correlation(counts_filtered, sample_info)
-    counts_filtered.to_pickle(f"{config.OUTPUT_DIR}/02_filtered_counts.pkl")
+    lib_sizes = check_library_sizes(counts)                                     #check1- seq depth
+    counts_filtered = filter_low_count_genes(counts)                            #check2- low count genes
+    corr_matrix = check_replicate_correlation(counts_filtered, sample_info)     #check3- bad replicates
+    counts_filtered.to_pickle(f"{config.OUTPUT_DIR}/02_filtered_counts.pkl")      # converting back to pickle 
+
+
+# -------------------------- NORMALIZATION --------------------------------------------------------------
+# PYDESEQ2 NEEDS GENES AS COLUMNS & SAMPLES AS ROWS [OUR EXACT OPPPOSITE], so we will transpose our file
+# Say, SampleA (10M reads) and SampleB (5M reads) both passed quality control, Sample A has TWICE as many total reads as Sample B.
+# Twice not because expressed highly, but sequenced twice deeply
+# lets say , sampleA = 200 count [10M total depth]    {depth will be calculated by adding counts of all genes for sampleA}
+#          , sampleB = 100 count [5M total depth]
+# Actually both are expressed equally 200/10Million =100/5Million= 0.02%  --> CPM MEHOD(will not be used here)
+# MEDIAN OF RATIOS METHOD for Normalization is used
 
 %%writefile step3_normalization.py
 import pandas as pd
@@ -156,7 +172,7 @@ import config
 def normalize_deseq2(counts: pd.DataFrame, sample_info: pd.DataFrame) -> pd.DataFrame:
     from pydeseq2.dds import DeseqDataSet
     from pydeseq2.default_inference import DefaultInference
-    counts_t = counts.T.astype(int)
+    counts_t = counts.T.astype(int)     # T.astype = transpose our row&column of row count matrix
     meta = sample_info.set_index(config.SAMPLE_ID_COL).loc[counts_t.index]
     design_col = config.CONDITION_COL
     if meta[design_col].nunique() < 2: design_col = config.TIMEPOINT_COL; meta[design_col] = meta[design_col].astype(str)
@@ -166,7 +182,7 @@ def normalize_deseq2(counts: pd.DataFrame, sample_info: pd.DataFrame) -> pd.Data
     print("✓ DESeq2 normalisation complete.")
     return normalized
 
-# for printing the result if this step
+# for printing the result of this step
 if __name__ == "__main__":
     counts = pd.read_pickle(f"{config.OUTPUT_DIR}/02_filtered_counts.pkl")
     sample_info = pd.read_pickle(f"{config.OUTPUT_DIR}/01_sample_info.pkl")
@@ -225,17 +241,18 @@ if __name__ == "__main__":
 
 ## Upload Your Own Data
 
-This pipeline expects two files inside a `data/` folder:
+#This pipeline expects two files inside a `data/` folder:
 
-1. **`raw_counts.csv`** — a raw count matrix, **genes as rows, samples as columns**. The first column must be the gene ID (this becomes the row index).
+# 1. **`raw_counts.csv`** — a raw count matrix, **genes as rows, samples as columns**. The first column must be the gene ID (this becomes the row index).
 
-2. **`sample_info.csv`** — one row per sample, with these columns:
-   - `sample_id` — must exactly match the column names used in `raw_counts.csv`
-   - `timepoint` — numeric (e.g. 0, 1, 4, 8, 24)
-   - `condition` — e.g. `control`, `antibiotic`
-   - `replicate` — replicate number (e.g. 1, 2)
+# 2. **`sample_info.csv`** — one row per sample, with these columns: YOU HAVE TO MAKE THIS FILE MANUALLY
+  #- `sample_id` — must exactly match the column names used in `raw_counts.csv`
+  #- `timepoint` — numeric (e.g. 0, 1, 4, 8, 24)
+  #- `condition` — e.g. `control`, `antibiotic`
+  #- `replicate` — replicate number (e.g. 1, 2)
 
-Run the cell below, then use the file picker to upload both CSVs (any names are fine — you'll be asked which file is which). They'll be copied into `data/raw_counts.csv` and `data/sample_info.csv` automatically.
+# RUN FOLLOWING CODE, then use the file picker to upload both CSVs (any names are fine — you'll be asked which file is which). 
+# They'll be copied into `data/raw_counts.csv` and `data/sample_info.csv` automatically.)
 
 import os
 import shutil
