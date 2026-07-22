@@ -162,7 +162,12 @@ if __name__ == "__main__":
 # lets say , sampleA = 200 count [10M total depth]    {depth will be calculated by adding counts of all genes for sampleA}
 #          , sampleB = 100 count [5M total depth]
 # Actually both are expressed equally 200/10Million =100/5Million= 0.02%  --> CPM MEHOD(will not be used here)
-# MEDIAN OF RATIOS METHOD for Normalization is used
+# MEDIAN OF RATIOS METHOD for Normalization is used:
+  #1- pseudo-reference = Calculate geometric mean of all expression values of a gene across all samples 
+  #2- Gene Ratios = divide each gene expression with its pseudo-ref calculated
+  #3- Size FActor = median of all those ratios is taken for a sample
+  # NORMALIZED COUNT = ( RAW COUNTS/SIZE FACTOR )
+##  IT WORKS BECAUSE GEOMETRIC MEANS IS BETTER FOR CALCULATION WHAT FOLD EXPRESSION IS CHANGED
 
 %%writefile step3_normalization.py
 import pandas as pd
@@ -173,8 +178,8 @@ def normalize_deseq2(counts: pd.DataFrame, sample_info: pd.DataFrame) -> pd.Data
     from pydeseq2.dds import DeseqDataSet
     from pydeseq2.default_inference import DefaultInference
     counts_t = counts.T.astype(int)     # T.astype = transpose our row&column of row count matrix
-    meta = sample_info.set_index(config.SAMPLE_ID_COL).loc[counts_t.index]
-    design_col = config.CONDITION_COL
+    meta = sample_info.set_index(config.SAMPLE_ID_COL).loc[counts_t.index]   
+    design_col = config.CONDITION_COL   # CONDITION as the factor is used DESeq2 uses to fit dispersion/size models
     if meta[design_col].nunique() < 2: design_col = config.TIMEPOINT_COL; meta[design_col] = meta[design_col].astype(str)
     dds = DeseqDataSet(counts=counts_t, metadata=meta, design=f"~{design_col}", inference=DefaultInference(), quiet=True)
     dds.fit_size_factors()
@@ -190,6 +195,9 @@ if __name__ == "__main__":
     if config.NORMALIZATION_METHOD == "deseq2":
         normalized = normalize_deseq2(counts, sample_info)
     normalized.to_pickle(f"{config.OUTPUT_DIR}/03_normalized_counts.pkl")
+
+# -------------------------- LOG TRANSFORM --------------------------------------------------------------
+# 
 
 %%writefile step4_log_transform_and_explore.py
 import pandas as pd
