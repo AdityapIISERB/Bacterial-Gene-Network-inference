@@ -217,6 +217,7 @@ if __name__ == "__main__":
   #1 - Diff files for diff conditions --> one file per condn;
   #2- dynGENIE3 models time-series dynamics & expects one single expression value per gene at each timepoint;
   #3- expects time series data as Numpy array rather than pandas data frames that we have used 
+  #4- expects Rows= timepoints % Columns= genes  [will be done via Transpose]
 %%writefile step5_export_for_dyngenie3.py
 import pandas as pd
 import numpy as np
@@ -232,12 +233,12 @@ def export_per_condition(log_data: pd.DataFrame, sample_info: pd.DataFrame):
         cond_data = log_data[cond_samples]           #picks only those columns which have names extracted based on conditons
         cond_meta = meta.loc[cond_samples]
         avg_by_timepoint = {}
-        for tp in sorted(cond_meta[config.TIMEPOINT_COL].unique()):
+        for tp in sorted(cond_meta[config.TIMEPOINT_COL].unique()):  #Iterates through every unique timepoint in sorted order t=0, 1, 2, 4...
             tp_samples = cond_meta[cond_meta[config.TIMEPOINT_COL] == tp].index
-            avg_by_timepoint[tp] = cond_data[tp_samples].mean(axis=1)
-        avg_matrix = pd.DataFrame(avg_by_timepoint).T
+            avg_by_timepoint[tp] = cond_data[tp_samples].mean(axis=1)  #
+        avg_matrix = pd.DataFrame(avg_by_timepoint).T                  #Transpose fro ro=timepoints & col=genes
 
-        # Strip out to plain numpy/python types -- no pandas objects, no dtype version issues
+        # To convert into Numpy 
         time_points = np.array(sorted(cond_meta[config.TIMEPOINT_COL].unique()), dtype=float)
         gene_names = [str(g) for g in avg_matrix.columns]
         TS_data = [np.array(avg_matrix.values, dtype=float)]
@@ -273,16 +274,12 @@ import os
 import shutil
 from google.colab import files
 
-# Create the data/ folder if it doesn't already exist (exist_ok=True
-# prevents an error if it's already there).
+# Create the data/ folder if it doesn't already exist (exist_ok=True prevents an error if it's already there).
 os.makedirs("data", exist_ok=True)
 
 print("Select your RAW COUNTS file (genes x samples):")
-# Opens Colab's file picker widget; returns a dict {filename: file_bytes}.
 uploaded_counts = files.upload()
-# Grab whatever filename the user picked (we don't assume a fixed name).
 counts_filename = list(uploaded_counts.keys())[0]
-# Move/rename it to the fixed path config.py expects.
 shutil.move(counts_filename, "data/raw_counts.csv")
 
 print("\nSelect your SAMPLE INFO file (sample_id, timepoint, condition, replicate):")
