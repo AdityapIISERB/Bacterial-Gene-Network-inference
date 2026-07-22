@@ -50,16 +50,20 @@ def load_sample_info(path: str) -> pd.DataFrame:
         raise FileNotFoundError(f"Could not find sample info file at '{path}'.")
     return pd.read_csv(path)
 
+#CHECKING IF THE LIST WE HAVE UPLOADDED CORRECTLY FITS WITH EACH OTHER;
+#EXAMPLE- IF SAMPLE_A IS WRITTEN IN RAWCOUNTS FILE SAME MUST BE IN SAMPLE INFO FILE WITHOUT ANY EROR OR TYPO
+#CREATING SETS TO KEEP EXPRESSION VALUES AND OTHER COLUMNS SEPERATE IN SETS TO DO MATHEMATICAL OPERATIONS 
 def validate_alignment(counts: pd.DataFrame, sample_info: pd.DataFrame):
-    count_samples = set(counts.columns)
-    meta_samples = set(sample_info[config.SAMPLE_ID_COL])
-    missing_in_meta = count_samples - meta_samples
+    count_samples = set(counts.columns)                         # A SET WITH NAME OF ALL SAMPLES WHICH IS COLUMN HEADER FROM RAWCOUNTS FILE
+    meta_samples = set(sample_info[config.SAMPLE_ID_COL])       # A SET WITH NAME OF ALL SAMPLES WHICH IS FIRST ROW FROM SAMPLEINFO FILE 
+    missing_in_meta = count_samples - meta_samples              # COMPARISON THROUGH SET SUBSTRACTION
     missing_in_counts = meta_samples - count_samples
-    problems = []
+    problems = []                                               # IF ANY MISMATCH IS FOUND STOP THE PIPELINE 
     if missing_in_meta: problems.append(f"  - Missing from sample_info.csv: {sorted(missing_in_meta)}")
     if missing_in_counts: problems.append(f"  - Missing from count matrix: {sorted(missing_in_counts)}")
-    if problems: raise ValueError("Sample mismatch:\n" + "\n".join(problems))
+    if problems: raise ValueError("Sample mismatch:\n" + "\n".join(problems))   #TO PRINT THE PROBLEM IN OUTPUT 
 
+    # RE-ORDERING STEPS--> sample columns in our count matrix (counts) and the rows in our metadata (sample_info) must be in the EXACT SAME ORDER
     # Explicitly rename 'index' back to config's SAMPLE_ID_COL after reindexing
     sample_info = sample_info.set_index(config.SAMPLE_ID_COL).loc[counts.columns]
     sample_info = sample_info.reset_index().rename(columns={"index": config.SAMPLE_ID_COL})
@@ -67,21 +71,31 @@ def validate_alignment(counts: pd.DataFrame, sample_info: pd.DataFrame):
     print(f"✓ All {len(count_samples)} samples match.")
     return sample_info
 
+# DEFINING FUNVCN To PRINT THE OUTPUT AND SHOW (HOW MANY RETAINED / FROM HOW MANY WERE AVAILABLE) & OTHER THINGS TOO
 def summarize_input(counts: pd.DataFrame, sample_info: pd.DataFrame):
     print("\n── Input summary ──")
-    print(f"Genes:               {counts.shape[0]}")
-    print(f"Samples:             {counts.shape[1]}")
+    print(f"Genes:               {counts.shape[0]}")       # NO OF ROWS=GENES
+    print(f"Samples:             {counts.shape[1]}")       # NO OF COLUMNS= SAMPLES
     print(f"Timepoints:           {sorted(sample_info[config.TIMEPOINT_COL].unique())}")
     print(f"Conditions:           {sample_info[config.CONDITION_COL].unique().tolist()}\n")
 
+# CALLING FUNCN TO PRINT THE SUMMARY
 if __name__ == "__main__":
-    counts = load_raw_counts(config.RAW_COUNTS_PATH)
-    sample_info = load_sample_info(config.SAMPLE_INFO_PATH)
+    counts = load_raw_counts(config.RAW_COUNTS_PATH)              # FOR LOADING both files from the paths defined in config.py
+    sample_info = load_sample_info(config.SAMPLE_INFO_PATH)       
     sample_info = validate_alignment(counts, sample_info)
-    summarize_input(counts, sample_info)
-    os.makedirs(config.OUTPUT_DIR, exist_ok=True)
-    counts.to_pickle(f"{config.OUTPUT_DIR}/01_raw_counts.pkl")
+    summarize_input(counts, sample_info)                          #CALLING THE FUNCN DEFINED ABOVE FOR SUMMARY
+    os.makedirs(config.OUTPUT_DIR, exist_ok=True)                 # MAKING sure the outputs/ folder exists before writing into it.
+    counts.to_pickle(f"{config.OUTPUT_DIR}/01_raw_counts.pkl")          # TURNING THE FILE TO PICKLE (PRESERVES DATATYPES USED IN FILE)
     sample_info.to_pickle(f"{config.OUTPUT_DIR}/01_sample_info.pkl")
+
+
+# -------------------------- QUALITY CONTROL -------------------------------------------------
+
+# PURPOSE: three independent QC checks —
+#   1. flag samples that were sequenced too shallowly
+#   2. drop genes that are essentially never expressed (noise, not signal)
+#   3. flag replicate pairs that don't correlate well (bad replicate / mislabeled sample) 
 
 %%writefile step2_quality_control.py
 import pandas as pd
@@ -93,21 +107,28 @@ sns.set_style("whitegrid")
 
 def check_library_sizes(counts: pd.DataFrame) -> pd.Series:
     lib_sizes = counts.sum(axis=0)
-    flagged = lib_sizes[lib_sizes < config.MIN_TOTAL_LIBRARY_SIZE]
-    if len(flagged) > 0:
-        for s, v in flagged.items(): print(f"  ⚠ Low depth -> {s}: {v:.0f} reads")
-    else: print(f"✓ All samples have enough reads.")
+    flagged = lib_sizes[lib_sizes < config.MIN_TOTAL_LIBRARY_SIZE]   # MIN_TOTAL_LIBRARY_SIZE as defined at the top as Global VAribale;
+    if len(flagged) > 0:                                            } 
+        for s, v in flagged.items():                                } # TO PRINT WHICH SAMPLES HAVE LOW DEPTH READ
+            print(f"  ⚠ Low depth -> {s}: {v:.0f} reads")          }
+    else:                                            
+        print(f"✓ All samples have enough reads.")   
     return lib_sizes
 
+# CHECKING FOR LOW COUNT GENES;
+# (counts >= MIN_COUNT_PER_GENE) --> True wherever a gene has at least 10 reads(as defined at the top) in that particular sample
+# >= MIN_SAMPLES_EXPRESSED -> True/False mask per gene: "is this gene expressed in enough samples to be worth keeping?"
 def filter_low_count_genes(counts: pd.DataFrame) -> pd.DataFrame:
-    expressed_mask = (counts >= config.MIN_COUNT_PER_GENE).sum(axis=1) >= config.MIN_SAMPLES_EXPRESSED
+    expressed_mask = (counts >= config.MIN_COUNT_PER_GENE).sum(axis=1) >= config.MIN_SAMPLES_EXPRESSED # sum(axis=1)--> sums each row
     filtered = counts.loc[expressed_mask]
     print(f"✓ Kept {filtered.shape[0]} / {counts.shape[0]} genes.")
     return filtered
 
+#CHCEKING FOR REPLICATE DUPLICATES IF PRESENT TO BE REMOVED
+# COMPARING WITH PERASON CORRELATION - BUT IT IS HIGHLY SKEWED RIGHT, SO FIRST LOG TRANSFROM VALUES
 def check_replicate_correlation(counts: pd.DataFrame, sample_info: pd.DataFrame):
-    log_counts = np.log2(counts + 1)
-    corr_matrix = log_counts.corr(method="pearson")
+    log_counts = np.log2(counts + 1)                      # LOG TRANSFFROMING compresses the skewness for better comparison
+    corr_matrix = log_counts.corr(method="pearson")      # PAIRWISE CORRELATION bw EACH COLUMN(SAMPLES)--> sample x sample correlation matrix
     grouped = sample_info.groupby([config.TIMEPOINT_COL, config.CONDITION_COL])[config.SAMPLE_ID_COL].apply(list)
     for group_key, samples in grouped.items():
         if len(samples) < 2: continue
@@ -145,6 +166,7 @@ def normalize_deseq2(counts: pd.DataFrame, sample_info: pd.DataFrame) -> pd.Data
     print("✓ DESeq2 normalisation complete.")
     return normalized
 
+# for printing the result if this step
 if __name__ == "__main__":
     counts = pd.read_pickle(f"{config.OUTPUT_DIR}/02_filtered_counts.pkl")
     sample_info = pd.read_pickle(f"{config.OUTPUT_DIR}/01_sample_info.pkl")
