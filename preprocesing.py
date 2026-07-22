@@ -197,7 +197,8 @@ if __name__ == "__main__":
     normalized.to_pickle(f"{config.OUTPUT_DIR}/03_normalized_counts.pkl")
 
 # -------------------------- LOG TRANSFORM --------------------------------------------------------------
-# 
+## log2(x + pseudocount). The pseudocount(1)(from config.py) is added becaus#e log2(0) is (-infinity)
+# genes with a normalize count of 0 in some sample would otherwise break the transform.
 
 %%writefile step4_log_transform_and_explore.py
 import pandas as pd
@@ -211,6 +212,11 @@ if __name__ == "__main__":
     print(f"✓ Log2 transform applied.")
     log_data.to_pickle(f"{config.OUTPUT_DIR}/04_log_normalized_counts.pkl")
 
+# -------------------------- EXPORT READY FOR dynGenie3 --------------------------------------------------------------
+#dynGENIE3 expects input structured in a specific way:
+  #1 - Diff files for diff conditions --> one file per condn;
+  #2- dynGENIE3 models time-series dynamics & expects one single expression value per gene at each timepoint;
+  #3- expects time series data as Numpy array rather than pandas data frames that we have used 
 %%writefile step5_export_for_dyngenie3.py
 import pandas as pd
 import numpy as np
@@ -221,8 +227,9 @@ def export_per_condition(log_data: pd.DataFrame, sample_info: pd.DataFrame):
     meta = sample_info.set_index(config.SAMPLE_ID_COL)
     conditions = meta[config.CONDITION_COL].unique()
     for cond in conditions:
-        cond_samples = meta[meta[config.CONDITION_COL] == cond].index
-        cond_data = log_data[cond_samples]
+        cond_samples = meta[meta[config.CONDITION_COL] == cond].index  
+        #cond_samples is now= ['S1_ctrl', 'S2_ctrl...'], or column present with the header sample_id  
+        cond_data = log_data[cond_samples]           #picks only those columns which have names extracted based on conditons
         cond_meta = meta.loc[cond_samples]
         avg_by_timepoint = {}
         for tp in sorted(cond_meta[config.TIMEPOINT_COL].unique()):
@@ -251,26 +258,31 @@ if __name__ == "__main__":
 
 #This pipeline expects two files inside a `data/` folder:
 
-# 1. **`raw_counts.csv`** — a raw count matrix, **genes as rows, samples as columns**. The first column must be the gene ID (this becomes the row index).
+# 1. "raw_counts.csv" — a raw count matrix, **genes as rows, samples as columns**. The first column must be the gene ID (this becomes the row index).
 
-# 2. **`sample_info.csv`** — one row per sample, with these columns: YOU HAVE TO MAKE THIS FILE MANUALLY
-  #- `sample_id` — must exactly match the column names used in `raw_counts.csv`
-  #- `timepoint` — numeric (e.g. 0, 1, 4, 8, 24)
-  #- `condition` — e.g. `control`, `antibiotic`
-  #- `replicate` — replicate number (e.g. 1, 2)
+# 2. "sample_info.csv" — one row per sample, with these columns: YOU HAVE TO MAKE THIS FILE MANUALLY
+  #- sample_id — must exactly match the column names used in `raw_counts.csv`
+  #- timepoint — numeric (e.g. 0, 1, 4, 8, 24)
+  #- condition — e.g. control, antibiotic
+  #- replicate — replicate number (e.g. 1, 2)
 
 # RUN FOLLOWING CODE, then use the file picker to upload both CSVs (any names are fine — you'll be asked which file is which). 
-# They'll be copied into `data/raw_counts.csv` and `data/sample_info.csv` automatically.)
+# They'll be copied into "data/raw_counts.csv" and "data/sample_info.csv" automatically.
 
 import os
 import shutil
 from google.colab import files
 
+# Create the data/ folder if it doesn't already exist (exist_ok=True
+# prevents an error if it's already there).
 os.makedirs("data", exist_ok=True)
 
 print("Select your RAW COUNTS file (genes x samples):")
+# Opens Colab's file picker widget; returns a dict {filename: file_bytes}.
 uploaded_counts = files.upload()
+# Grab whatever filename the user picked (we don't assume a fixed name).
 counts_filename = list(uploaded_counts.keys())[0]
+# Move/rename it to the fixed path config.py expects.
 shutil.move(counts_filename, "data/raw_counts.csv")
 
 print("\nSelect your SAMPLE INFO file (sample_id, timepoint, condition, replicate):")
@@ -280,12 +292,17 @@ shutil.move(info_filename, "data/sample_info.csv")
 
 print("\n✓ Files saved to data/raw_counts.csv and data/sample_info.csv")
 
+
+# -------------------------- CORE EXECUTION SCRIPT --------------------------------------------------------------
+# PURPOSE: seperated script — runs all 5 steps in order as separate subprocesses, stopping immediately if any step fails
+
 %%writefile run_pipeline.py
 import subprocess
 import sys
 import os
 import config
 
+# The exact order matters: each step reads the previous step'spickled output (e.g. step2 needs 01_raw_counts.pkl from step1).
 STEPS = [
     "step1_load_data.py",
     "step2_quality_control.py",
@@ -295,17 +312,24 @@ STEPS = [
 ]
 
 if __name__ == "__main__":
+    # Make sure outputs/ exists before any step tries to write into it.
     os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+
     print("=" * 45)
     print(" RUNNING FULL DATA PREPARATION PIPELINE")
     print("=" * 45)
+
     for step_script in STEPS:
+        # sys.executable -> guarantees we use the SAME python interpreter that's running the previous code;
+        # Each step is run as its own subprocess, no chance of failing other part of code
         result = subprocess.run([sys.executable, step_script])
+
+        # subprocess.run's returncode is 0 on success, non-zero if the script raised an uncaught exception (like the FileNotFoundError)
+        # Checking this immediately prevents other step from running on top of a step that never actually finished;
         if result.returncode != 0:
             print(f"\n✗ Pipeline stopped — '{step_script}' failed.")
             sys.exit(1)
+
     print("=" * 45)
     print(" PIPELINE COMPLETE. Find outputs in 'outputs/'")
     print("=" * 45)
-
-!python run_pipeline.py
