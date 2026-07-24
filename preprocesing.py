@@ -16,10 +16,10 @@ REPLICATE_COL   = "replicate"
 
 #NOW WE WILL INTRODUCE THRESHOLDS FOR FILTERING UNWANTED NOISY ERRORFUL SAMPLES 
 
-MIN_COUNT_PER_GENE     = 10
-MIN_SAMPLES_EXPRESSED  = 2
-MIN_TOTAL_LIBRARY_SIZE = 1e5
-REPLICATE_CORR_THRESHOLD = 0.85
+MIN_COUNT_PER_GENE     = 10          # edgeR default=10; doi:10.12688/f1000research.8987.2
+MIN_SAMPLES_EXPRESSED  = 2           #Although we are using pydeseq here, but edgeR automatically sets it to 2
+MIN_TOTAL_LIBRARY_SIZE = 5e6         #Pearson Correlation, 
+REPLICATE_CORR_THRESHOLD = 0.90     
 
 NORMALIZATION_METHOD = "deseq2"   
 LOG_PSEUDOCOUNT = 1               #global variable set to 1 so that if counts is 0, their log doesn't go to minus infinity
