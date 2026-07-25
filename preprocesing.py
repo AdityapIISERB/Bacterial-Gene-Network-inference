@@ -134,7 +134,7 @@ def filter_low_count_genes(counts: pd.DataFrame) -> pd.DataFrame:
 def check_replicate_correlation(counts: pd.DataFrame, sample_info: pd.DataFrame):
     log_counts = np.log2(counts + 1)                      # LOG TRANSFFROMING compresses the skewness for better comparison
     corr_matrix = log_counts.corr(method="pearson")      # PAIRWISE CORRELATION bw EACH COLUMN(SAMPLES)--> sample x sample correlation matrix
-    grouped = sample_info.groupby([config.TIMEPOINT_COL, config.CONDITION_COL])[config.SAMPLE_ID_COL].apply(list)
+    grouped = sample_info.groupby([config.TIMEPOINT_COL, config.CONDITION_COL])[config.SAMPLE_ID_COL].apply(list)    #To compare Correlation bw samples of same condition
     for group_key, samples in grouped.items():
         if len(samples) < 2: continue
         for i in range(len(samples)):
