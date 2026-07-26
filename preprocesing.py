@@ -212,6 +212,48 @@ if __name__ == "__main__":
     print(f"✓ Log2 transform applied.")
     log_data.to_pickle(f"{config.OUTPUT_DIR}/04_log_normalized_counts.pkl")
 
+    print("\n── Step 4b: Skewness Diagnostic Plot ──")
+
+
+# -------------------------- Plotting Skewness --------------------------------------------------------------
+# Here We are plotting skewness of data [how many genes (density) have what count]
+# Y-axis= density; X-axis= count
+# For 2 samples - amplicllin 1/4 x MIC at t=0 rep1; & amplicllin 1/16 x MIC at t=0 rep1
+ 
+    sample_1 = "amp_1_4_t0_rep1"
+    sample_2 = "amp_1_16_t0_rep1"
+ 
+    fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(12, 9)) #For side by side, we use axes
+ 
+    # Plot 1: Top-Left (raw/normalized, sample 1)
+    axes[0, 0].hist(normalized[sample_1], bins=50, color='darkgreen')
+    axes[0, 0].set_xlabel('Read Count')
+    axes[0, 0].set_ylabel('Frequency')
+    axes[0, 0].set_title(f'Genome-wide Count Profile ({sample_1})')
+ 
+    # Plot 2: Top-Right (raw/normalized, sample 2)
+    axes[0, 1].hist(normalized[sample_2], bins=50, color='darkgreen')
+    axes[0, 1].set_xlabel('Read Count')
+    axes[0, 1].set_ylabel('Frequency')
+    axes[0, 1].set_title(f'Genome-wide Count Profile ({sample_2})')
+ 
+    # Plot 3: Bottom-Left (log-transformed, sample 1)
+    axes[1, 0].hist(log_data[sample_1], bins=50, color='darkgreen')
+    axes[1, 0].set_xlabel('Log2(Read Count + 1)')
+    axes[1, 0].set_ylabel('Frequency')
+    axes[1, 0].set_title(f'Log2 Transformed ({sample_1})')
+ 
+    # Plot 4: Bottom-Right (log-transformed, sample 2)
+    axes[1, 1].hist(log_data[sample_2], bins=50, color='darkgreen')
+    axes[1, 1].set_xlabel('Log2(Read Count + 1)')
+    axes[1, 1].set_ylabel('Frequency')
+    axes[1, 1].set_title(f'Log2 Transformed ({sample_2})')
+ 
+    plt.tight_layout()
+    plt.savefig(f"{config.OUTPUT_DIR}/04b_raw_vs_log_histogram.png", dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"✓ Saved histogram comparison -> {config.OUTPUT_DIR}/04b_raw_vs_log_histogram.png")
+
 # -------------------------- EXPORT READY FOR dynGenie3 --------------------------------------------------------------
 #dynGENIE3 expects input structured in a specific way:
   #1 - Diff files for diff conditions --> one file per condn;
