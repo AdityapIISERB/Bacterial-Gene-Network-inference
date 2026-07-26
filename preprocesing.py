@@ -374,3 +374,5 @@ if __name__ == "__main__":
     print("=" * 45)
     print(" PIPELINE COMPLETE. Find outputs in 'outputs/'")
     print("=" * 45)
+# -------------------------- RUN EXECUTION SCRIPT --------------------------------------------------------------
+!python run_pipeline.py
