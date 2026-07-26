@@ -108,9 +108,9 @@ sns.set_style("whitegrid")
 def check_library_sizes(counts: pd.DataFrame) -> pd.Series:
     lib_sizes = counts.sum(axis=0)
     flagged = lib_sizes[lib_sizes < config.MIN_TOTAL_LIBRARY_SIZE]   # MIN_TOTAL_LIBRARY_SIZE as defined at the top as Global VAribale;
-    if len(flagged) > 0:                                            } 
-        for s, v in flagged.items():                                } # TO PRINT WHICH SAMPLES HAVE LOW DEPTH READ
-            print(f"  ⚠ Low depth -> {s}: {v:.0f} reads")          }
+    if len(flagged) > 0:                                             
+        for s, v in flagged.items():                                 # TO PRINT WHICH SAMPLES HAVE LOW DEPTH READ
+            print(f"  ⚠ Low depth -> {s}: {v:.0f} reads")          
     else:                                            
         print(f"✓ All samples have enough reads.")   
     return lib_sizes
