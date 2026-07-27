@@ -131,48 +131,34 @@ def filter_low_count_genes(counts: pd.DataFrame) -> pd.DataFrame:
 # compare bw 2 replicates; LOG_rep_1 vs LOG_rep_2--> r=1(if one goes up, another goes up too), r=-1(opposite), r=0(no pattern)
 # COMPARING WITH PERASON CORRELATION - BUT IT IS HIGHLY SKEWED RIGHT, SO FIRST LOG TRANSFORM VALUES
 # is this gene expressed in enough samples to be worth keeping ?
-def check_replicate_correlation(counts: pd.DataFrame, sample_info: pd.DataFrame):
-    log_counts = np.log2(counts + 1)                      # LOG TRANSFFROMING compresses the skewness for better comparison
-    corr_matrix = log_counts.corr(method="pearson")      # PAIRWISE CORRELATION bw EACH COLUMN(SAMPLES)--> sample x sample correlation matrix
-    grouped = sample_info.groupby([config.TIMEPOINT_COL, config.CONDITION_COL])[config.SAMPLE_ID_COL].apply(list)    #To compare Correlation bw samples of same condition
-    for group_key, samples in grouped.items():
-        if len(samples) < 2: continue
-        for i in range(len(samples)):
-            for j in range(i + 1, len(samples)):
-                r = corr_matrix.loc[samples[i], samples[j]]
-                if r < config.REPLICATE_CORR_THRESHOLD:         # THIS CHECKS IF r>=0.85(REPLICATE_CORR_THRESHOLD)(defined in config at top) those 2 samples are replicates;
-                    print(f"  ⚠ Low corr -> {group_key}: {samples[i]} vs {samples[j]} (r = {r:.3f})")
-    return corr_matrix
-
 # ACTUALLY REMOVES one sample from each low-correlating replicate pair. Between two disagreeing replicates we can't know for certain
 # WHICH one is "wrong" from correlation alone -- but the one with the lower total library size is the more likely technical failure, so
 # that's the tie-breaker used here. This runs AFTER filter_low_depth_samples, so by this point most genuinely broken (very-low-depth) 
 # samples are already gone; this catches replicate pairs that still disagree for reasons other than raw depth.
 
-def filter_bad_replicates(counts: pd.DataFrame, sample_info: pd.DataFrame,
-                           lib_sizes: pd.Series) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    log_counts = np.log2(counts + 1)
-    corr_matrix = log_counts.corr(method="pearson")
+def check_and_filter_replicates(counts: pd.DataFrame, sample_info: pd.DataFrame,
+                                 lib_sizes: pd.Series) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    log_counts = np.log2(counts + 1)                      # LOG TRANSFFROMING compresses the skewness for better comparison
+    corr_matrix = log_counts.corr(method="pearson")      # PAIRWISE CORRELATION bw EACH COLUMN(SAMPLES)--> sample x sample correlation matrix
+    #grouped on the basis of condition and timepoint
     grouped = sample_info.groupby([config.TIMEPOINT_COL, config.CONDITION_COL])[config.SAMPLE_ID_COL].apply(list)
     to_drop = set()
     for group_key, samples in grouped.items():
-        if len(samples) < 2: continue
+        if len(samples) < 2: continue               #to check if there is atleast two samples present to compare otherwise skips(continue)
         for i in range(len(samples)):
             for j in range(i + 1, len(samples)):
                 s1, s2 = samples[i], samples[j]
                 if s1 in to_drop or s2 in to_drop:
-                    continue  # already dropping one of this pair for another reason
+                    continue                        # already dropping one of this pair 
                 r = corr_matrix.loc[s1, s2]
-                if r < config.REPLICATE_CORR_THRESHOLD:
-                    worse = s1 if lib_sizes.get(s1, 0) < lib_sizes.get(s2, 0) else s2
+                if r < config.REPLICATE_CORR_THRESHOLD:         # THIS CHECKS IF r<0.90(REPLICATE_CORR_THRESHOLD)(defined in config at top) those 2 samples are replicates;
+                    worse = s1 if lib_sizes.get(s1, 0) < lib_sizes.get(s2, 0) else s2     #Second check for lib sizes to decide which replicate to drop
                     print(f"  ⚠ Low corr -> {group_key}: {s1} vs {s2} (r = {r:.3f}) — dropping {worse}")
                     to_drop.add(worse)
     if to_drop:
         counts = counts.drop(columns=list(to_drop))
         sample_info = sample_info[~sample_info[config.SAMPLE_ID_COL].isin(to_drop)].reset_index(drop=True)
-        # recompute on the now-cleaned data so the returned matrix
-        # reflects what's ACTUALLY in the final dataset, not the
-        # pre-drop version
+        # recompute on the now-cleaned data so the returned matrix reflects what's ACTUALLY in the final dataset, not the pre-drop version
         corr_matrix = np.log2(counts + 1).corr(method="pearson")
     return counts, sample_info, corr_matrix
 
