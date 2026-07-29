@@ -213,6 +213,57 @@ if __name__ == "__main__":
     if config.NORMALIZATION_METHOD == "deseq2":
         normalized = normalize_deseq2(counts, sample_info)
     normalized.to_pickle(f"{config.OUTPUT_DIR}/03_normalized_counts.pkl")
+#---------------------------BOX PLOT COMPARISON --------------------------------------------------------
+# PURPOSE: produce the two QC plots-  a before/after boxplot of log-scaled counts per sample
+# compare RAW counts (post-filtering, pre-normalization)
+# against DESeq2-NORMALIZED counts, to visually confirm that normalization actually aligned the sample distributions.
+# ---------------------------------------------------------
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import config
+
+sns.set_style("whitegrid")
+
+def plot_boxplot_comparison(raw_counts: pd.DataFrame, norm_counts: pd.DataFrame,
+                             out_path: str = "outputs/qc_boxplot_comparison.png"):
+    """
+    Draws two side-by-side boxplots: log2(counts+1) per sample,
+    BEFORE normalization (left) and AFTER normalization (right).
+
+    What to look for: on the left, box medians will sit at different
+    heights across samples (different sequencing depth / composition).
+    On the right, medians should line up much more closely — that
+    alignment is the visual proof that normalization worked.
+    """
+    # log2(x + 1): pseudocount of 1 avoids log2(0) = -inf. This is a
+    # DISPLAY-ONLY transform — it does not touch step4's actual
+    # log-transformed pipeline output, it's just so the boxplot isn't
+    # crushed by a handful of extremely highly-expressed genes.
+    log_raw = np.log2(raw_counts + 1)
+    log_norm = np.log2(norm_counts + 1)
+
+    fig, axes = plt.subplots(1, 2, figsize=(18, 6), sharey=True)
+
+    # sns.boxplot expects "long-form" data by default when given a
+    # DataFrame directly it treats each column as one box — exactly
+    # what we want (one box per sample).
+    sns.boxplot(data=log_raw, ax=axes[0], color="lightcoral")
+    axes[0].set_title("Before Normalization (raw counts)")
+    axes[0].set_ylabel("log2(count + 1)")
+    axes[0].tick_params(axis='x', rotation=90)
+
+    sns.boxplot(data=log_norm, ax=axes[1], color="mediumseagreen")
+    axes[1].set_title("After Normalization (DESeq2)")
+    axes[1].tick_params(axis='x', rotation=90)
+
+    fig.suptitle("QC: Count Distribution Before vs. After Normalization", fontsize=14)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"✓ Saved boxplot comparison -> {out_path}")
 
 # -------------------------- LOG TRANSFORM --------------------------------------------------------------
 ## log2(x + pseudocount). The pseudocount(1)(from config.py) is added becaus#e log2(0) is (-infinity)
