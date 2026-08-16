@@ -169,8 +169,9 @@ if __name__ == "__main__":
     print("\n── Step 2: Quality Control ──")
     lib_sizes = check_library_sizes(counts)                                     #check1- seq depth
     counts_filtered = filter_low_count_genes(counts)                            #check2- low count genes
-    corr_matrix = check_replicate_correlation(counts_filtered, sample_info)     #check3- bad replicates
-    counts_filtered.to_pickle(f"{config.OUTPUT_DIR}/02_filtered_counts.pkl")      # converting back to pickle 
+    counts_filtered, sample_info, corr_matrix = check_and_filter_replicates(counts_filtered, sample_info, lib_sizes)     #check3- bad replicates (now actually applies the drop)
+    counts_filtered.to_pickle(f"{config.OUTPUT_DIR}/02_filtered_counts.pkl")      # converting back to pickle
+    sample_info.to_pickle(f"{config.OUTPUT_DIR}/02_filtered_sample_info.pkl")     # cleaned sample_info, so downstream steps use it too
 
 
 # -------------------------- NORMALIZATION --------------------------------------------------------------
