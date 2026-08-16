@@ -209,7 +209,7 @@ def normalize_deseq2(counts: pd.DataFrame, sample_info: pd.DataFrame) -> pd.Data
 # for printing the result of this step
 if __name__ == "__main__":
     counts = pd.read_pickle(f"{config.OUTPUT_DIR}/02_filtered_counts.pkl")
-    sample_info = pd.read_pickle(f"{config.OUTPUT_DIR}/01_sample_info.pkl")
+    sample_info = pd.read_pickle(f"{config.OUTPUT_DIR}/02_filtered_sample_info.pkl")
     print("\n── Step 3: Normalisation ──")
     if config.NORMALIZATION_METHOD == "deseq2":
         normalized = normalize_deseq2(counts, sample_info)
@@ -277,6 +277,7 @@ import config
 
 if __name__ == "__main__":
     normalized = pd.read_pickle(f"{config.OUTPUT_DIR}/03_normalized_counts.pkl")
+    sample_info = pd.read_pickle(f"{config.OUTPUT_DIR}/02_filtered_sample_info.pkl")
     print("\n── Step 4: Log Transform ──")
     log_data = np.log2(normalized + config.LOG_PSEUDOCOUNT)
     print(f"✓ Log2 transform applied.")
@@ -426,7 +427,7 @@ def export_per_condition(log_data: pd.DataFrame, sample_info: pd.DataFrame):
 
 if __name__ == "__main__":
     log_data = pd.read_pickle(f"{config.OUTPUT_DIR}/04_log_normalized_counts.pkl")
-    sample_info = pd.read_pickle(f"{config.OUTPUT_DIR}/01_sample_info.pkl")
+    sample_info = pd.read_pickle(f"{config.OUTPUT_DIR}/02_filtered_sample_info.pkl")
     print("\n── Step 5: Export for dynGENIE3 ──")
     export_per_condition(log_data, sample_info)
 
