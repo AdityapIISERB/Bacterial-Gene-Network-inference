@@ -323,6 +323,67 @@ if __name__ == "__main__":
     plt.close()
     print(f"✓ Saved histogram comparison -> {config.OUTPUT_DIR}/04b_raw_vs_log_histogram.png")
 
+# ---------------------------------------PCA PLOT----------------------------------------------
+    print("\n── Step 4c: PCA Plot (samples) ──")
+
+    from sklearn.decomposition import PCA
+    from matplotlib.colors import LinearSegmentedColormap
+    from matplotlib.lines import Line2D
+
+    expr_matrix = log_data.T                     # rows = samples, columns = genes (what PCA expects)
+    pca = PCA(n_components=2)
+    pcs = pca.fit_transform(expr_matrix.values)   # fit + project samples onto PC1 & PC2
+    pct_var = pca.explained_variance_ratio_ * 100 # how much of the total variance each PC captures
+
+    pca_df = pd.DataFrame(pcs, columns=["PC1", "PC2"], index=expr_matrix.index)
+    pca_df = pca_df.merge(
+        sample_info.set_index(config.SAMPLE_ID_COL)[[config.CONDITION_COL, config.TIMEPOINT_COL]],
+        left_index=True, right_index=True
+    )
+
+    # one color family (colormap) per condition; gradient within a condition = timepoint
+    # (light -> dark = early -> late). Update these keys if your condition names differ.
+    cmaps = {
+        "amp_1_4":  LinearSegmentedColormap.from_list("amp14", ["#c6dbef", "#08306b"]),  # blues
+        "amp_1_16": LinearSegmentedColormap.from_list("amp16", ["#c7e9c0", "#00441b"]),  # greens
+        "cipro":    LinearSegmentedColormap.from_list("cipro", ["#fdd0a2", "#7f2704"]),  # oranges
+    }
+    tp_min = pca_df[config.TIMEPOINT_COL].min()
+    tp_max = pca_df[config.TIMEPOINT_COL].max()
+
+    fig, ax = plt.subplots(figsize=(9, 7))
+    for cond, cmap in cmaps.items():
+        subset = pca_df[pca_df[config.CONDITION_COL] == cond]
+        if subset.empty:
+            continue
+        norm_tp = (subset[config.TIMEPOINT_COL] - tp_min) / (tp_max - tp_min)
+        colors = cmap(norm_tp.values)
+        ax.scatter(subset["PC1"], subset["PC2"], c=colors, s=110,
+                   edgecolor="black", linewidth=0.6, label=cond, zorder=3)
+
+    ax.set_xlabel(f"PC1 ({pct_var[0]:.1f}% variance)")
+    ax.set_ylabel(f"PC2 ({pct_var[1]:.1f}% variance)")
+    ax.set_title("PCA of Samples")
+    ax.grid(alpha=0.3)
+
+    cond_legend = [Line2D([0], [0], marker="o", color="w", markerfacecolor=cmaps[c](0.7),
+                          markeredgecolor="black", markersize=10, label=c) for c in cmaps]
+    leg1 = ax.legend(handles=cond_legend, title=config.CONDITION_COL, loc="upper left", bbox_to_anchor=(1.02, 1))
+    ax.add_artist(leg1)
+
+    gray_cmap = LinearSegmentedColormap.from_list("gray", ["#dddddd", "#222222"])
+    tp_vals = sorted(pca_df[config.TIMEPOINT_COL].unique())
+    tp_legend = [Line2D([0], [0], marker="o", color="w",
+                        markerfacecolor=gray_cmap((t - tp_min) / (tp_max - tp_min)),
+                        markeredgecolor="black", markersize=9, label=f"t={t}") for t in tp_vals]
+    ax.legend(handles=tp_legend, title="Timepoint\n(light→dark = early→late)", loc="lower left", bbox_to_anchor=(1.02, 0))
+
+    plt.tight_layout()
+    plt.savefig(f"{config.OUTPUT_DIR}/04c_pca_plot.png", dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"✓ Saved PCA plot -> {config.OUTPUT_DIR}/04c_pca_plot.png")
+
+
 # -------------------------- EXPORT READY FOR dynGenie3 --------------------------------------------------------------
 #dynGENIE3 expects input structured in a specific way:
   #1 - Diff files for diff conditions --> one file per condn;
